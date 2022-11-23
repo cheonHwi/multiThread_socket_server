@@ -1,0 +1,5 @@
+﻿  server.c
+C:\Users\LG\Desktop\chating\server\server\server.c(102,9): warning C4244: 'return': 'SOCKET'에서 'int'(으)로 변환하면서 데이터가 손실될 수 있습니다.
+C:\Users\LG\Desktop\chating\server\server\server.c(206,84): warning C4312: '형식 캐스트': 'int'에서 더 큰 'void *'(으)로의 변환입니다.
+C:\Users\LG\Desktop\chating\server\server\server.c(216,24): warning C4311: '형식 캐스트': 'void *'에서 'int'(으)로 포인터가 잘립니다.
+  server.vcxproj -> C:\Users\LG\Desktop\chating\server\x64\Debug\server.exe
