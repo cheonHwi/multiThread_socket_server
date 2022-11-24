@@ -5,8 +5,10 @@
 #include <WinSock2.h>
 #include <process.h>
 #include <string.h>
+//#include <mysql.h>
 
 #pragma comment (lib, "Ws2_32.lib")
+//#pragma comment (lib, "libmysql.lib")
 
 #define client_count 10
 
@@ -24,7 +26,6 @@ typedef struct sock_info
 {
 	SOCKET s;
 	HANDLE ev;
-	char nick[50];
 	char ipaddr[50];
 } SOCK_INFO;
 
@@ -42,7 +43,7 @@ int main(int argc, char* argv[])
 	if (argv[1] != NULL) {
 		PORT = atoi(argv[1]);		// 명령 인수는 문자열이기 때문에 숫자로 변환
 	}
-	
+
 	mainthread = (HANDLE)_beginthreadex(NULL, 0, do_chat_service, (void*)0, 0, &tid);
 	if (mainthread)
 	{
@@ -129,12 +130,11 @@ unsigned int WINAPI do_chat_service(void* param)
 	}
 	else
 	{
-		printf("\n >> 서버 초기화가 완료되었습니다.(포트번호:%d)\n", PORT);
+		printf("\n >> server initalize succeed.(PORT:%d)\n", PORT);
 
 		HANDLE event = WSACreateEvent();
 		sock_array[total_socket_count].ev = event;
 		sock_array[total_socket_count].s = server_socket;
-		strcpy(sock_array[total_socket_count].nick, "svr");
 		strcpy(sock_array[total_socket_count].ipaddr, "0.0.0.0");
 
 		WSAEventSelect(server_socket, event, FD_ACCEPT);
@@ -157,6 +157,7 @@ unsigned int WINAPI do_chat_service(void* param)
 					read_client(index);
 				else if (ev.lNetworkEvents == FD_CLOSE)
 					remove_client(index);
+
 			}
 		}
 		closesocket(server_socket);
@@ -191,15 +192,16 @@ int add_client(int index)
 		WSAEventSelect(accept_sock, event, FD_READ | FD_CLOSE);
 
 		total_socket_count++;
-		printf(" >> 신규 클라이언트 접속(IP : %s)\n", inet_ntoa(addr.sin_addr));
+		printf(" >> New Client connected(IP : %s)\n", inet_ntoa(addr.sin_addr));
 
 		char msg[256];
-		sprintf(msg, " >> 신규 클라이언트 접속(IP : %s)\n", inet_ntoa(addr.sin_addr));
+		sprintf(msg, " >> New Client connected(IP : %s)\n", inet_ntoa(addr.sin_addr));
 		notify_client(msg);
 	}
 
 	return 0;
 }
+
 int read_client(int index)
 {
 	unsigned int tid;
@@ -228,13 +230,11 @@ unsigned int WINAPI recv_and_forward(void* param)
 		getpeername(sock_array[index].s, (SOCKADDR*)&client_address, &addr_len);
 		strcpy(share_message, message);
 
-		if (strlen(sock_array[index].nick) <= 0)
-		{
-			token1 = strtok_s(message, "]", &next_token);
-			strcpy(sock_array[index].nick, token1 + 1);
-		}
+		printf("%s\n", share_message);
 		for (int i = 1; i < total_socket_count; i++)
+		{
 			send(sock_array[i].s, share_message, MAXBYTE, 0);
+		}
 	}
 
 	_endthreadex(0);
@@ -247,8 +247,8 @@ void remove_client(int index)
 	char message[MAXBYTE];
 
 	strcpy(remove_ip, get_client_ip(index));
-	printf(" >> 클라이언트 접속 종료(Index: %d, IP: %s, 별명: %s)\n", index, remove_ip, sock_array[index].nick);
-	sprintf(message, " >> 클라이언트 접속 종료(IP: %s, 별명: %s)\n", remove_ip, sock_array[index].nick);
+	printf(" >> Client Disconnected(Index: %d, IP: %s)\n", index, remove_ip);
+	sprintf(message, " >> Client Disconnected(IP: %s)\n", remove_ip);
 
 	closesocket(sock_array[index].s);
 	WSACloseEvent(sock_array[index].ev);
@@ -257,7 +257,6 @@ void remove_client(int index)
 	sock_array[index].s = sock_array[total_socket_count].s;
 	sock_array[index].ev = sock_array[total_socket_count].ev;
 	strcpy(sock_array[index].ipaddr, sock_array[total_socket_count].ipaddr);
-	strcpy(sock_array[index].nick, sock_array[total_socket_count].nick);
 
 	notify_client(message);
 }
