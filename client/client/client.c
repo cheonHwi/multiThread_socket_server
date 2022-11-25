@@ -16,6 +16,7 @@ int main(int argc, char* argv[])
 {
     char ip_addr[256] = "";
     int port_number = 9999;
+    char nickname[50] = "";
     unsigned int tid;
     int sock;
     char input[MAXBYTE] = "";
@@ -24,10 +25,11 @@ int main(int argc, char* argv[])
     HANDLE mainthread;
 
 
-    if (argv[1] != NULL && argv[2] != NULL)
+    if (argv[1] != NULL && argv[2] != NULL && argv[3] != NULL)
     {
         strcpy(ip_addr, argv[1]);  //서버 주소
         port_number = atoi(argv[2]); //포트 번호
+        strcpy(nickname, argv[3]); //별명
     }
 
     sock = client_init(ip_addr, port_number);
@@ -44,7 +46,7 @@ int main(int argc, char* argv[])
         {
             memset(message, 0, sizeof(message));
             gets(input, MAXBYTE);
-            sprintf(message, "[%s] : %s", ip_addr, input);
+            sprintf(message, "%s/%s/%s", ip_addr, nickname, input);
             send(sock, message, sizeof(message), 0);
             pexit = strrchr(message, '/');
             if (pexit)

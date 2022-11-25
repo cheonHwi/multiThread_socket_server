@@ -1,26 +1,31 @@
 ﻿#define _WINSOCK_DEPRECATED_NO_WARNINGS
 #define _CRT_SECURE_NO_WARNINGS
 
-#include <stdio.h>
 #include <WinSock2.h>
-#include <process.h>
+#include <stdio.h>
 #include <string.h>
-//#include <mysql.h>
+#include <mysql.h>
+#include <process.h>
 
 #pragma comment (lib, "Ws2_32.lib")
-//#pragma comment (lib, "libmysql.lib")
+#pragma comment (lib, "libmysql.lib")
 
 #define client_count 10
 
+#define HOST "127.0.0.1"
+#define USER "root"
+#define PASSWORD "1234"
+#define DATABASE "clang"
+
 int server_init();
 int server_close();
-unsigned int WINAPI do_chat_service(void* param);
-unsigned int WINAPI recv_and_forward(void* param);
 int add_client(int index);
 int read_client(int index);
 void remove_client(int index);
 int notify_client(char* message);
 char* get_client_ip(int index);
+unsigned int WINAPI do_chat_service(void* param);
+unsigned int WINAPI recv_and_forward(void* param);
 
 typedef struct sock_info
 {
@@ -30,9 +35,12 @@ typedef struct sock_info
 } SOCK_INFO;
 
 int PORT = 5552;
-//const int client_count = 10;
-SOCK_INFO sock_array[client_count + 1];
 int total_socket_count = 0;
+SOCK_INFO sock_array[client_count + 1];
+
+MYSQL* conn, * connection;
+MYSQL_RES* result;
+MYSQL_ROW row;
 
 int main(int argc, char* argv[]) 
 {
@@ -55,6 +63,7 @@ int main(int argc, char* argv[])
 
 			notify_client(message);
 		}
+		mysql_close(conn);
 		server_close();
 		WSACleanup();
 		CloseHandle(mainthread);
@@ -68,7 +77,7 @@ int server_init()
 	WSADATA wsadata;
 	SOCKET s;
 	SOCKADDR_IN server_address;
-
+	
 	memset(&sock_array, 0, sizeof(sock_array));
 	total_socket_count = 0;
 	if (WSAStartup(MAKEWORD(2, 2), &wsadata) != 0)
@@ -103,12 +112,14 @@ int server_init()
 	return s;
 }
 
-int server_close()
+int database_init()
 {
-	for (int i = 1; i < total_socket_count; i++)
+	conn = mysql_init(NULL);
+
+	if (!mysql_real_connect(conn, HOST, USER, PASSWORD, DATABASE, 3306, NULL, 0))
 	{
-		closesocket(sock_array[i].s);
-		WSACloseEvent(sock_array[i].ev);
+		//printf(" >> database initalize failed.\n");
+		return 1;
 	}
 
 	return 0;
@@ -122,6 +133,13 @@ unsigned int WINAPI do_chat_service(void* param)
 	int index;
 	WSAEVENT handle_array[client_count + 1];
 
+	if (database_init() < 0) {
+		printf("데이터베이스 에러\n");
+		exit(0);
+	}
+	else {
+		printf(" >> database initalize succeed.\n");
+	}
 	server_socket = server_init();
 	if (server_socket < 0)
 	{
@@ -130,7 +148,7 @@ unsigned int WINAPI do_chat_service(void* param)
 	}
 	else
 	{
-		printf("\n >> server initalize succeed.(PORT:%d)\n", PORT);
+		printf(" >> server initalize succeed.(PORT:%d)\n", PORT);
 
 		HANDLE event = WSACreateEvent();
 		sock_array[total_socket_count].ev = event;
@@ -168,6 +186,45 @@ unsigned int WINAPI do_chat_service(void* param)
 
 	return 0;
 
+}
+
+unsigned int WINAPI recv_and_forward(void* param)
+{
+	int index = (int)param;
+	char sended_message[MAXBYTE];
+	char message[MAXBYTE];
+	char sql[MAXBYTE];
+	SOCKADDR_IN client_address;
+	int recv_len = 0, addr_len = 0;
+	char* token1 = NULL;
+	char* next_token = NULL;
+
+	memset(&client_address, 0, sizeof(client_address));
+
+	if ((recv_len = recv(sock_array[index].s, sended_message, MAXBYTE, 0)) > 0)
+	{
+		addr_len = sizeof(client_address);
+		getpeername(sock_array[index].s, (SOCKADDR*)&client_address, &addr_len);
+
+		char* content = NULL;
+		char* ipaddr = strtok_s(sended_message, "/", &content); //공백을 기준으로 문자열 자르기
+		char* nickname = strtok_s(content, "/", &content);
+
+		sprintf(message, "[%s:%s] : %s\n", ipaddr, nickname, content);
+		sprintf(sql, "insert into clang.chat_record(chat_writer, chat_content) values('%s','%s')", nickname, content);
+		if (mysql_query(conn, sql) != 0)
+		{
+			printf("%d", mysql_errno(conn));
+		}
+		printf("%s", message);
+		for (int i = 1; i < total_socket_count; i++)
+		{
+			send(sock_array[i].s, message, MAXBYTE, 0);
+		}
+	}
+
+	_endthreadex(0);
+	return 0;
 }
 
 int add_client(int index)
@@ -213,34 +270,6 @@ int read_client(int index)
 	return 0;
 }
 
-unsigned int WINAPI recv_and_forward(void* param)
-{
-	int index = (int)param;
-	char message[MAXBYTE], share_message[MAXBYTE];
-	SOCKADDR_IN client_address;
-	int recv_len = 0, addr_len = 0;
-	char* token1 = NULL;
-	char* next_token = NULL;
-
-	memset(&client_address, 0, sizeof(client_address));
-
-	if ((recv_len = recv(sock_array[index].s, message, MAXBYTE, 0)) > 0)
-	{
-		addr_len = sizeof(client_address);
-		getpeername(sock_array[index].s, (SOCKADDR*)&client_address, &addr_len);
-		strcpy(share_message, message);
-
-		printf("%s\n", share_message);
-		for (int i = 1; i < total_socket_count; i++)
-		{
-			send(sock_array[i].s, share_message, MAXBYTE, 0);
-		}
-	}
-
-	_endthreadex(0);
-	return 0;
-}
-
 void remove_client(int index)
 {
 	char remove_ip[256];
@@ -282,3 +311,15 @@ int notify_client(char* message)
 
 	return 0;
 }
+
+int server_close()
+{
+	for (int i = 1; i < total_socket_count; i++)
+	{
+		closesocket(sock_array[i].s);
+		WSACloseEvent(sock_array[i].ev);
+	}
+
+	return 0;
+}
+

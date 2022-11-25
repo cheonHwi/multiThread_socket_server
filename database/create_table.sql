@@ -11,9 +11,9 @@ create table chating_room(
     constraint room_pk primary key (room_id),
 	constraint member_fk foreign key(room_member) references user_data(user_id) on update cascade on delete cascade
 );
-
 create table chat_record(
-	chat_writer varchar(15) primary key,
+	chat_index int not null primary key auto_increment,
+	chat_writer varchar(15),
     chat_content varchar(255),
     chat_time varchar(25),
     room_id int,
