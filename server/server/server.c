@@ -1,11 +1,13 @@
 ﻿#define _WINSOCK_DEPRECATED_NO_WARNINGS
 #define _CRT_SECURE_NO_WARNINGS
 
-#include <WinSock2.h>
 #include <stdio.h>
+#include <WinSock2.h>
+#include <process.h>
 #include <string.h>
 #include <mysql.h>
-#include <process.h>
+#include <time.h>
+#include <windows.h>
 
 #pragma comment (lib, "Ws2_32.lib")
 #pragma comment (lib, "libmysql.lib")
@@ -17,15 +19,21 @@
 #define PASSWORD "1234"
 #define DATABASE "clang"
 
+int database_init();
 int server_init();
 int server_close();
+unsigned int WINAPI do_chat_service(void* param);
+unsigned int WINAPI recv_and_forward(void* param);
 int add_client(int index);
 int read_client(int index);
 void remove_client(int index);
-int notify_client(char* message);
 char* get_client_ip(int index);
-unsigned int WINAPI do_chat_service(void* param);
-unsigned int WINAPI recv_and_forward(void* param);
+int notify_client(char* message);
+void select_menu(SOCKET accept_sock, int method, struct messageForm msg);
+int send_message(struct messageForm msg);
+int load_chat_room(SOCKET accept_sock);
+int load_chat_record(SOCKET accept_sock, struct messageForm msg);
+
 
 typedef struct sock_info
 {
@@ -34,18 +42,28 @@ typedef struct sock_info
 	char ipaddr[50];
 } SOCK_INFO;
 
+struct messageForm
+{
+	int method;
+	char nickname[50];
+	char content[MAXBYTE];
+}msg;
+
+
 int PORT = 5552;
+//const int client_count = 10;
 int total_socket_count = 0;
 SOCK_INFO sock_array[client_count + 1];
 
 MYSQL* conn, * connection;
 MYSQL_RES* result;
 MYSQL_ROW row;
+char sql[MAXBYTE];
 
-int main(int argc, char* argv[]) 
-{
+int main(int argc, char* argv[])
+{	
 	unsigned int tid;				// 스레드 ID
-	char message[ MAXBYTE ];
+	char message[MAXBYTE];
 	HANDLE mainthread;
 
 	if (argv[1] != NULL) {
@@ -63,7 +81,6 @@ int main(int argc, char* argv[])
 
 			notify_client(message);
 		}
-		mysql_close(conn);
 		server_close();
 		WSACleanup();
 		CloseHandle(mainthread);
@@ -77,7 +94,7 @@ int server_init()
 	WSADATA wsadata;
 	SOCKET s;
 	SOCKADDR_IN server_address;
-	
+
 	memset(&sock_array, 0, sizeof(sock_array));
 	total_socket_count = 0;
 	if (WSAStartup(MAKEWORD(2, 2), &wsadata) != 0)
@@ -118,8 +135,24 @@ int database_init()
 
 	if (!mysql_real_connect(conn, HOST, USER, PASSWORD, DATABASE, 3306, NULL, 0))
 	{
-		//printf(" >> database initalize failed.\n");
-		return 1;
+		printf(" >> database initalize failed.\n");
+		printf("%d", mysql_errno(conn));
+		mysql_close(conn);
+		exit(1);
+	}
+	else {
+		mysql_set_character_set(conn, "euckr");
+	}
+
+	return 0;
+}
+
+int server_close()
+{
+	for (int i = 1; i < total_socket_count; i++)
+	{
+		closesocket(sock_array[i].s);
+		WSACloseEvent(sock_array[i].ev);
 	}
 
 	return 0;
@@ -133,22 +166,23 @@ unsigned int WINAPI do_chat_service(void* param)
 	int index;
 	WSAEVENT handle_array[client_count + 1];
 
-	if (database_init() < 0) {
-		printf("데이터베이스 에러\n");
+	server_socket = server_init();
+
+	if (database_init() < 0) 
+	{
+		printf("database initalize error\n");
 		exit(0);
 	}
-	else {
-		printf(" >> database initalize succeed.\n");
-	}
-	server_socket = server_init();
+
 	if (server_socket < 0)
 	{
-		printf("초기화 에러\n");
+		printf("socket server initalize error\n");
 		exit(0);
 	}
 	else
 	{
-		printf(" >> server initalize succeed.(PORT:%d)\n", PORT);
+		printf(" >> database initalize succeed.");
+		printf("\n >> server initalize succeed.(PORT:%d)\n", PORT);
 
 		HANDLE event = WSACreateEvent();
 		sock_array[total_socket_count].ev = event;
@@ -180,51 +214,12 @@ unsigned int WINAPI do_chat_service(void* param)
 		}
 		closesocket(server_socket);
 	}
-
+	mysql_close(conn);
 	WSACleanup();
 	_endthreadex(0);
 
 	return 0;
 
-}
-
-unsigned int WINAPI recv_and_forward(void* param)
-{
-	int index = (int)param;
-	char sended_message[MAXBYTE];
-	char message[MAXBYTE];
-	char sql[MAXBYTE];
-	SOCKADDR_IN client_address;
-	int recv_len = 0, addr_len = 0;
-	char* token1 = NULL;
-	char* next_token = NULL;
-
-	memset(&client_address, 0, sizeof(client_address));
-
-	if ((recv_len = recv(sock_array[index].s, sended_message, MAXBYTE, 0)) > 0)
-	{
-		addr_len = sizeof(client_address);
-		getpeername(sock_array[index].s, (SOCKADDR*)&client_address, &addr_len);
-
-		char* content = NULL;
-		char* ipaddr = strtok_s(sended_message, "/", &content); //공백을 기준으로 문자열 자르기
-		char* nickname = strtok_s(content, "/", &content);
-
-		sprintf(message, "[%s:%s] : %s\n", ipaddr, nickname, content);
-		sprintf(sql, "insert into clang.chat_record(chat_writer, chat_content) values('%s','%s')", nickname, content);
-		if (mysql_query(conn, sql) != 0)
-		{
-			printf("%d", mysql_errno(conn));
-		}
-		printf("%s", message);
-		for (int i = 1; i < total_socket_count; i++)
-		{
-			send(sock_array[i].s, message, MAXBYTE, 0);
-		}
-	}
-
-	_endthreadex(0);
-	return 0;
 }
 
 int add_client(int index)
@@ -251,9 +246,8 @@ int add_client(int index)
 		total_socket_count++;
 		printf(" >> New Client connected(IP : %s)\n", inet_ntoa(addr.sin_addr));
 
-		char msg[256];
-		sprintf(msg, " >> New Client connected(IP : %s)\n", inet_ntoa(addr.sin_addr));
-		notify_client(msg);
+		sprintf(msg.content, " >> New Client connected(IP : %s)\n", inet_ntoa(addr.sin_addr));
+		notify_client(msg.content);
 	}
 
 	return 0;
@@ -267,6 +261,56 @@ int read_client(int index)
 
 	CloseHandle(mainthread);
 
+	return 0;
+}
+
+unsigned int WINAPI recv_and_forward(void* param)
+{
+	int index = (int)param;
+	char message[MAXBYTE];
+	SOCKADDR_IN client_address;
+	int recv_len = 0, addr_len = 0;
+	char* token1 = NULL;
+	char* next_token = NULL;
+
+	memset(&client_address, 0, sizeof(client_address));
+
+	if(recv_len = recv(sock_array[index].s, (struct messageForm*)&msg, sizeof(msg), 0)  > 0)
+	{
+		memset(sql, 0, MAXBYTE);
+		memset(message, 0, MAXBYTE);
+
+		int method = msg.method;
+
+		
+		if (method == 4)	// 메인 채팅9
+		{
+			send_message(msg);
+		}
+		else if (method == 3)	// 채팅방 선택
+		{
+			load_chat_room(sock_array[index].s);
+			load_chat_record(sock_array[index].s, msg);
+		}
+		else if (method == 1)		// 로그인
+		{
+			msg.method = 0;
+			strcpy(msg.nickname, "test");
+			send(sock_array[index].s, (struct messageForm*)&msg, sizeof(msg), 0);
+			
+		}
+		else if (method == 2)	// 회원가입
+		{
+			printf("회원가입 루프 진입\n");			
+		}
+		else if (method == 0)
+		{
+			set_method(sock_array[index].s, msg);
+		}
+		
+	}
+
+	_endthreadex(1);
 	return 0;
 }
 
@@ -306,20 +350,84 @@ char* get_client_ip(int index)
 
 int notify_client(char* message)
 {
+	strcpy(msg.content, message);
+
 	for (int i = 1; i < total_socket_count; i++)
-		send(sock_array[i].s, message, MAXBYTE, 0);
+		send(sock_array[i].s, (struct messageForm*)&msg, sizeof(msg), 0);
 
 	return 0;
 }
 
-int server_close()
+int load_chat_room(SOCKET accept_sock)
 {
-	for (int i = 1; i < total_socket_count; i++)
-	{
-		closesocket(sock_array[i].s);
-		WSACloseEvent(sock_array[i].ev);
+	char sql[MAXBYTE];
+
+	strcpy(sql, "select room_number, room_name from chat_room ");
+
+	mysql_query(conn, sql);
+	result = mysql_store_result(conn);
+
+	while (row = mysql_fetch_row(result)) { //값이 없을때까지 변환함
+		sprintf(msg.content, "%s\t%s\n", row[0], row[1]);
+		msg.method = 4;
+		send(accept_sock, (struct messageForm*)&msg, sizeof(msg), 0);
 	}
+	//mysql_free_result(result);
+	return 0;
+}
+
+int load_chat_record(SOCKET accept_sock, struct messageForm msg)
+{
+	SOCKET s = accept_sock;
+	char sql[MAXBYTE];
+	int room_number = atoi(msg.content);
+
+	sprintf(
+		sql,
+		"select chat_writer, chat_content, chat_time from (select * from clang.chat_content where chat_room = %d order by chat_index desc limit 10) as a order by chat_index asc;",
+		room_number);
+
+	mysql_query(conn, sql);
+	result = mysql_store_result(conn);
+
+	while (row = mysql_fetch_row(result)) { //값이 없을때까지 변환함
+		sprintf(msg.content, "[%s] %s\n%s", row[0], row[1], row[2]);
+		msg.method = 4;
+		send(s, (struct messageForm*)&msg, sizeof(msg), 0);
+	}
+	//mysql_free_result(result);
+	return 0;
+}
+
+int send_message(struct messageForm msg)
+{	
+	
+	char message[MAXBYTE];
+	char timeString[MAXBYTE];
+
+	time_t seconds = time(NULL);
+	struct tm* now = localtime(&seconds);
+
+	sprintf(timeString, "%04d/%02d/%02d %02d:%02d:%02d\n", 1900 + now->tm_year, now->tm_mon + 1, now->tm_mday, now->tm_hour, now->tm_min, now->tm_sec);
+	sprintf(message, "[%s] %s\n%s", msg.nickname, msg.content, timeString);
+
+	printf("%s\n", message);
+
+	sprintf(sql, "insert into chat_content(chat_writer, chat_content, chat_time, chat_room) values('%s', '%s', '%s', 1)",
+		msg.nickname, msg.content, timeString);
+
+	if (mysql_query(conn, sql))
+		printf("%d", mysql_errno(conn));
+
+	notify_client(message);
 
 	return 0;
 }
 
+int set_method(SOCKET accept_sock, struct messageForm msg)
+{
+	msg.method = -1;
+	send(accept_sock, (struct messageForm*)&msg, sizeof(msg), 0);
+
+	return 0;
+}

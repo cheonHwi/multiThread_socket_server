@@ -5,31 +5,41 @@
 #include <process.h>
 #include <string.h> 
 #include <time.h>
+#include <windows.h>
 
 #pragma comment (lib, "Ws2_32.lib")
 
 int client_init(char* ip, int port);
 unsigned int WINAPI do_chat_service(void* param);
 
+struct messageForm
+{
+    int method;
+    char nickname[50];
+    char content[MAXBYTE];
+} msg;
+
+BOOL roop = 1;
+char userInfo[MAXBYTE] = "";
+
 int main(int argc, char* argv[])
 
 {
     char ip_addr[256] = "";
     int port_number = 9999;
-    char nickname[50] = "";
+    //char nickname[50] = "";
     unsigned int tid;
     int sock;
-    char input[MAXBYTE] = "";
-    char message[MAXBYTE] = "";
+    char id[MAXBYTE] = "";
+    char password[MAXBYTE] = "";
     char* pexit = NULL;
     HANDLE mainthread;
 
 
-    if (argv[1] != NULL && argv[2] != NULL && argv[3] != NULL)
+    if (argv[1] != NULL && argv[2] != NULL)
     {
         strcpy(ip_addr, argv[1]);  //서버 주소
         port_number = atoi(argv[2]); //포트 번호
-        strcpy(nickname, argv[3]); //별명
     }
 
     sock = client_init(ip_addr, port_number);
@@ -39,19 +49,22 @@ int main(int argc, char* argv[])
         exit(0);
     }
 
+
+
     mainthread = (HANDLE)_beginthreadex(NULL, 0, do_chat_service, (void*)sock, 0, &tid);
     if (mainthread)
     {
+        //Sleep(200);
+        //while (msg.method == 1)
+
         while (1)
         {
-            memset(message, 0, sizeof(message));
-            gets(input, MAXBYTE);
-            sprintf(message, "%s/%s/%s", ip_addr, nickname, input);
-            send(sock, message, sizeof(message), 0);
-            pexit = strrchr(message, '/');
-            if (pexit)
-                if (strcmp(pexit, "/x") == 0)
-                    break;
+            gets(msg.content, MAXBYTE);
+                pexit = strrchr(msg.content, '/');
+                if (pexit)
+                    if (strcmp(pexit, "/x") == 0)
+                        break;
+            send(sock, (struct messageForm*)&msg, sizeof(msg), 0);
         }
 
         closesocket(sock);
@@ -113,9 +126,16 @@ unsigned int WINAPI do_chat_service(void* params)
             WSAEnumNetworkEvents(s, event, &ev);
             if (ev.lNetworkEvents == FD_READ)
             {
-                int len = recv(s, recv_message, MAXBYTE, 0);
-                if (len > 0)
-                    printf("%s\n", recv_message);
+                int len = recv(s, (struct messageForm*)&msg, sizeof(msg), 0);
+                if (msg.content > 0)
+                {
+                    if (msg.method == -1)
+                        msg.method = atoi(msg.content);
+                    else if (!strcmp(msg.nickname, ""))
+                        strcpy(msg.nickname, msg.nickname);
+                    else
+                        printf("%s",msg.content);
+                }
             }
             else if (ev.lNetworkEvents == FD_CLOSE)
             {
